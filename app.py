@@ -76,7 +76,13 @@ def gerar_pdf(casas_data):
     
     # Dados de cada casa
     for nome, leituras in casas_data.items():
-        total_kwh = sum(leituras)
+        total_kwh = 0
+        
+        # Calcula o consumo total (diferença entre leituras)
+        for i in range(1, len(leituras)):
+            consumo = leituras[i]['valor'] - leituras[i-1]['valor']
+            total_kwh += consumo
+        
         custo = total_kwh * PRECO_KWH
         limite = LIMITES[nome]
         
@@ -110,7 +116,7 @@ def gerar_pdf(casas_data):
         
         # Histórico de leituras
         if leituras:
-            elementos_hist = ', '.join([f'{x:.2f} kWh' for x in leituras])
+            elementos_hist = ', '.join([f"{x['data']} - {x['valor']:.2f} kWh" for x in leituras])
             elements.append(Paragraph(f"<b>Histórico de Leituras:</b> {elementos_hist}", styles['Normal']))
         else:
             elements.append(Paragraph("<b>Histórico de Leituras:</b> Nenhuma leitura registrada", styles['Normal']))
@@ -119,7 +125,12 @@ def gerar_pdf(casas_data):
     
     # Resumo total
     elements.append(Paragraph("RESUMO GERAL", heading_style))
-    total_geral_kwh = sum(sum(leituras) for leituras in casas_data.values())
+    total_geral_kwh = 0
+    for leituras in casas_data.values():
+        for i in range(1, len(leituras)):
+            consumo = leituras[i]['valor'] - leituras[i-1]['valor']
+            total_geral_kwh += consumo
+    
     custo_geral = total_geral_kwh * PRECO_KWH
     
     resumo_data = [
@@ -154,22 +165,30 @@ def gerar_pdf(casas_data):
 st.title("⚡ Controle de Consumo de Energia")
 
 # Formulário para adicionar leitura
-st.subheader("➕ Adicionar Leitura Diária")
+st.subheader("➕ Adicionar Leitura do Consumo")
 casa_selecionada = st.selectbox(
     "Selecione a Casa:", list(st.session_state.casas.keys())
 )
-kwh_input = st.number_input(
-    "Consumo (kWh):", min_value=0.0, step=0.1, format="%.2f"
-)
+
+col1, col2 = st.columns(2)
+with col1:
+    data_leitura = st.date_input("Data da Leitura:")
+with col2:
+    kwh_input = st.number_input(
+        "Leitura do Consumo (kWh):", min_value=0.0, step=0.1, format="%.2f"
+    )
 
 if st.button("Salvar Leitura"):
-    if kwh_input > 0:
-        st.session_state.casas[casa_selecionada].append(kwh_input)
+    if kwh_input >= 0:
+        st.session_state.casas[casa_selecionada].append({
+            'data': data_leitura.strftime('%d/%m/%Y'),
+            'valor': kwh_input
+        })
         st.success(
-            f"✅ {kwh_input:.2f} kWh adicionados para {casa_selecionada}!"
+            f"✅ Leitura de {kwh_input:.2f} kWh adicionada para {casa_selecionada} em {data_leitura.strftime('%d/%m/%Y')}!"
         )
     else:
-        st.warning("⚠️ Digite um valor maior que zero.")
+        st.warning("⚠️ Digite um valor válido.")
 
 st.divider()
 
@@ -178,13 +197,26 @@ st.subheader("📊 Resumo das Casas")
 relatorio_texto = "=== RELATÓRIO DE CONSUMO DE ENERGIA ===\n\n"
 
 for nome, leituras in st.session_state.casas.items():
-    total_kwh = sum(leituras)
+    total_kwh = 0
+    
+    # Calcula o consumo total (diferença entre leituras)
+    for i in range(1, len(leituras)):
+        consumo = leituras[i]['valor'] - leituras[i-1]['valor']
+        total_kwh += consumo
+    
     custo = total_kwh * PRECO_KWH
     limite = LIMITES[nome]
 
     # Prepara texto para exportação
     relatorio_texto += f"Casa: {nome}\n"
-    relatorio_texto += f"Histórico: {leituras}\n"
+    if leituras:
+        for i, leitura in enumerate(leituras):
+            if i == 0:
+                relatorio_texto += f"  [{leitura['data']}] Leitura: {leitura['valor']:.2f} kWh (referência)\n"
+            else:
+                consumo = leituras[i]['valor'] - leituras[i-1]['valor']
+                relatorio_texto += f"  [{leitura['data']}] Leitura: {leitura['valor']:.2f} kWh | Consumo: {consumo:.2f} kWh\n"
+    
     relatorio_texto += f"Consumo Total: {total_kwh:.2f} kWh\n"
     relatorio_texto += f"Custo Total: R$ {custo:.2f}\n"
     relatorio_texto += "-" * 40 + "\n"
@@ -194,8 +226,19 @@ for nome, leituras in st.session_state.casas.items():
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"### 🏠 **{nome}**")
-            st.write(f"**Total:** {total_kwh:.2f} kWh")
+            st.write(f"**Consumo Total:** {total_kwh:.2f} kWh")
             st.write(f"**Custo:** R$ {custo:.2f}")
+            
+            # Exibe histórico de leituras
+            if leituras:
+                st.write("**Histórico:**")
+                for i, leitura in enumerate(leituras):
+                    if i == 0:
+                        st.write(f"  • {leitura['data']}: {leitura['valor']:.2f} kWh (referência)")
+                    else:
+                        consumo = leituras[i]['valor'] - leituras[i-1]['valor']
+                        st.write(f"  • {leitura['data']}: {leitura['valor']:.2f} kWh (consumo: {consumo:.2f} kWh)")
+        
         with col2:
             if total_kwh > limite:
                 st.error(
@@ -204,6 +247,34 @@ for nome, leituras in st.session_state.casas.items():
             else:
                 st.info(f"🟢 Dentro do limite ({limite} kWh)")
         st.divider()
+
+# Botões de ação
+st.subheader("⚙️ Ações")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("🗑️ Zerar Todos os Contadores", use_container_width=True):
+        st.session_state.casas = {
+            "Dercilio": [],
+            "Saulo": [],
+            "Ricardo": [],
+            "Aligas": [],
+        }
+        st.success("✅ Todos os contadores foram zerados!")
+        st.rerun()
+
+with col2:
+    casa_limpar = st.selectbox(
+        "Selecione a casa para zerar:", 
+        list(st.session_state.casas.keys()),
+        key="selectbox_limpar"
+    )
+    if st.button("🗑️ Zerar Esta Casa", use_container_width=True):
+        st.session_state.casas[casa_limpar] = []
+        st.success(f"✅ Contador de {casa_limpar} foi zerado!")
+        st.rerun()
+
+st.divider()
 
 # Botões de exportação
 st.subheader("📥 Exportar Dados")
@@ -215,6 +286,7 @@ with col1:
         data=relatorio_texto,
         file_name="controle_energia.txt",
         mime="text/plain",
+        use_container_width=True
     )
 
 with col2:
@@ -224,4 +296,5 @@ with col2:
         data=pdf_buffer,
         file_name="controle_energia.pdf",
         mime="application/pdf",
+        use_container_width=True
     )
